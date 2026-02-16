@@ -1,26 +1,50 @@
 # LLMs In Loop
-- <tagline> Build Chatbot, Coding CLI and openclaw from scratch
+- <tagline> From Chatbot to Autonomous Agent: Everything is an LLM in a Loop
 
-We will cover:
+In this article we progressively evolve a single loop into real systems:
 
-1. How to do Inference and and what are tool use
-2. Chatbot: with context (from scratch)
-3. Coding CLI: `Claude CLI` (from scratch)
-4. Digital Assistant: minimal openClaw alternative (from Scratch) 
+1. **Inference** → basic LLM response
+2. **A chatbot** → Conversation history and the loop
+3. **A coding agent** → tools to let it read and edit files *(minimal Claude-Code–style CLI)*
+4. **An autonomous assistant** → Add scheduled tasks + messaging via telegram *(minimal OpenClaw-style system)*
 
-Note: All the code in this page is pseudocode, you can find actual notebook accompanying this blog at: [walkthrough.ipynb](./walkthrough.ipynb)
+Note: Code snippets in this article are pseudocode for clarity, The completee working implemenmtation is available in the accompanying notebook: [walkthrough.ipynb](./walkthrough.ipynb)
 
 ## 1. Introduction
-LLMs have been with us for long time and over time, the different applications have been built around them with different functions based on domain of work. In this blog post, I would like to argue that all these applications are simply LLM in loop, with domain specific tools interacting with an environment.
+Modern AI applications look very different: chatbots, coding agents, and autonomous assistants. But internally they all share the same architecture: a loop around a language model.
+
+In this article we will start from a single function and progressively grow it into an autonomous agent.
 
 ### 1.1 LLM Inference:
-- Inference is term that refers to asking LLM to do generate next token and Prompts are instructions we give LLM to get the desired output (e.g. asking chatgpt, what is ...)
+![LLM-Inference](./images/1.1-LLM-Inference.png)
 
-In this blog-post, we are using Gemini as our LLM provider, and `gemini-2.5` as our model of choice, we can always use more powerful models like `gemini-3` or `claude-4.6` for better results.
+An LLM does not *think*, search, or reason in the traditional sense.  
+It performs a single operation:
 
-- Note: Before we proceed, get your api key from [Google AI Studio](https://aistudio.google.com/app/api-keys) and place it in `.env` file
+> Given text, predict what text should come next.
 
-we will use function like below to perform inference throughout rest of the sections, please refer to [walkthrough.ipynb](walkthrough.ipynb) for actual code
+This process is called **inference**.
+
+A *prompt* is simply the text we provide as input, and the model continues it.  
+When you ask a question, you are not triggering a special “question answering mode” — you are just giving it a sentence that statistically expects an answer to follow.
+
+Because of this, every AI application we build must ultimately reduce to one primitive function:
+
+Everything else: memory, tools, autonomy — will be built around repeatedly calling this function.
+For the implementation in this article we will use a hosted model (Gemini), but any LLM provider can be substituted with minimal changes.  
+The concrete API details are not important; what matters is that we can ask the model for a continuation of text.
+
+Pseudocode:
+
+```
+def respond(query):
+    response = <ask model to continue the text>
+    return response
+```
+
+The runnable implementation is available in [walkthrough.ipynb](walkthrough.ipynb).
+
+> Note: you will need an API key from [Google AI Studio](https://aistudio.google.com/app/api-keys) and place it in `.env`.
 
 ```
 def respond(query):
@@ -28,279 +52,439 @@ def respond(query):
     return response
 ```
 
-## 1.2 The Loop (Birth of Chatbot)
 
-We defined `generate` function in previous section, lets put it in a loop and we will get a chatbot (like chatgpt).
+
+## 1.2 The Loop (Birth of a Chatbot)
+![LLM-Inference](./images/1.2-The-Loop.png)
+
+Right now our program can answer a single question once.
+
+But conversations are not single questions — they are **repeated interactions**.
+
+So instead of calling the model once, we keep calling it forever:
 
 ```
 while True:
-    query = input("User")
+    query = input("User: ")
     response = respond(query)
     print(response)
-
-'''
-## Output
-User: What are the must-see places in Pokhara?
-LLM: Phewa Lake, World Peace Pagoda, Sarangkot, ...
-'''
 ```
 
-Lets try asking it a follow up question
+Surprisingly, this tiny change already creates something recognizable: a chatbot.
+
 ```
 User: What are the must-see places in Pokhara?
 LLM: Phewa Lake, World Peace Pagoda, Sarangkot, ...
+```
 
-User: I prefer peaceful spots - can you adjust the plan?
+We did not add memory.
+We did not add reasoning.
+We only repeated the same function.
+
+---
+
+Now let’s continue the conversation:
+
+```
+User: What are the must-see places in Pokhara?
+LLM: Phewa Lake, World Peace Pagoda, Sarangkot, ...
+
+User: I prefer peaceful spots — can you adjust the plan?
 LLM: ... where you're planning to go?
 ```
 
+The model fails the follow-up question.
 
-It does not know previous question because we are only giving it the current query, lets store it in variable context
+Why?
 
-### 1.3 Conversationi History
-We will store our conversation with LLM in list named `history` and pass history to `respond` function
- 
+Because every iteration of the loop is independent.
+The model only sees the **current message**, not the conversation.
+
+To the model, the second question looks like it appeared out of nowhere.
+
+So the next step is obvious:
+
+> If conversations require memory, we must store the past and send it back to the model each time.
+
+We will call this stored past the **history**.
+
+
+### 1.3 Conversation History (Memory Emerges)
+
+![](images/1.3-History.png)
+
+
+To hold a conversation, the model must see previous messages every time it responds.
+
+The model itself has no memory.  
+So we create memory manually by storing the dialogue and replaying it back to the model on each turn.
+
+We call this stored dialogue the **history**.
+
 ```
 history = []
 
 while True:
-    query = input("User")
+    query = input("User: ")
     history.append(query)
-    
-    response = respond(query)
+
+    response = respond(history)
     history.append(response)
 
     print(response)
+```
 
-'''
-## Output
+Now the model receives not just the latest question, but the entire conversation so far.
+
+```
 User: What are the must-see places in Pokhara?
 LLM: Phewa Lake, World Peace Pagoda, Sarangkot, ...
 
-User: I prefer peaceful spots - can you adjust the plan?
+User: I prefer peaceful spots — can you adjust the plan?
 LLM: For peaceful spots in Pokhara, consider visiting World Peace Pagoda.
-'''
 ```
 
-Now, it can answer follow-up questions.
+Nothing inside the model changed.
+
+We did not upgrade the architecture.  
+We did not fine-tune it.
+
+We simply **replayed the past into the future**.
+
+And from that, memory appeared.
 
 
+### 1.4 Tools: Agency Appears
+![](images/1.4-Tool-Use.png)
 
-### 1.4 Tools (Agency Appears):
-- Tools are functions that a LLM can execute with custom parameters. LLMs can only genereate tokens and tool calling is using those tokens to execute functions. Tools are like hands and legs of LLMs, which help them to perform tasks in real world, like searching web, installing dependencies, writing or executing code and much more. It also expands knowledge of LLM beyond the data it was trained on, so that they dont have to memorise everythihng.
+
+So far our system can **talk**.
+
+It remembers the conversation and produces coherent replies.
+But it is still trapped inside text.
+
+Ask it something simple:
+
+> *What is the weather in Pokhara right now?*
+
+The model will confidently answer — but it is guessing.
+Because the model cannot see the internet.
+It only predicts tokens.
+
+A language model has only one ability:
+
+> generate text
+
+To interact with the real world, it needs something more.
+
+It needs **actions**.
+
+We give actions to the model using **tools**.
+
+A tool is just a function the model is allowed to call with structured arguments.
+The model writes tokens → we interpret them → we execute code.
+
+So tools become the model’s hands.
 
 ```
-# Weather tool
+User → LLM → decides action → runs code → returns result → LLM explains result
+```
 
-# 1. Tool Implementation
+---
+
+#### Example: Weather Tool
+
+First we define a normal function:
+
+```
 def get_weather(place_name):
-    weather = <get-weather-via-some-API-call>
+    weather = <api-call>
     return weather
 ```
 
-```
-# 2. respond function
-def respond(query, config):
-    response = <infenrence-code: Execute tool or Get response>
-    return response
-```
-
-
-Lets write a very basic system prompt. System prompt is high-level, foundational instructions given to define its persona and behaviour throughout the conversation. They are useful to set the tone, boundaries and output format of the model.
+Now we allow the model to use it.
 
 ```
-# 3. Config
 config = GenerateContentConfig(
     tools=[get_weather],
-    system_instruction="You are a general-purpose helpful assistant..."
+    system_instruction="You are a helpful assistant."
 )
 ```
 
+Our `respond` function now does two possible things:
+
+1. return normal text
+2. request a tool execution
+
 ```
-# 4. The Loop
+def respond(history, config):
+    response = <model-call>
 
-history = []
+    if response.requests_tool:
+        result = execute_tool(response)
+        return result
 
+    return response.text
+```
+
+---
+
+#### Same Loop — New Behavior
+
+Notice something important:
+
+We did **not** change the architecture.
+We did **not** add a new loop.
+
+We only allowed the loop to sometimes execute code.
+
+```
 while True:
-    query = input("User")
+    query = input("User: ")
     history.append(query)
-    
-    response = respond(query, config=config)
+
+    response = respond(history, config)
     history.append(response)
 
     print(response)
-'''
-## Response
-User:  What is the weather in Pokhara right now?
-LLM: <Checking weather for 'Pokhara'...>
-The weather in Pokhara is rainy
-'''
 ```
 
-- I have omitted tool defination part here (which is organizing the tool in proper format for LLM), please go through [walkthrough.ipynb](./walkthrough.ipynb) for complete implementation.
+Now the model can act:
 
-- Also refer to [gemini-api-docs](https://ai.google.dev/gemini-api/docs/function-calling) for more on function calling
-
-
-## 2. Coding Agent: `Minimal Claude CLI implementation (from scratch)`
-Coding is one of the intellectual fields we have been hoping to automate long before the advent of ChatGPT. There was github copilot (before ChatGpt), that used to do autocompletes, since the advent of ChatGPT, we have been getting increasingly better coding assistants simply by putting the LLM in loop and askinig it to generate the code (with some clever techniques like giving LLM only certain part of the code). Some examples of Agentic coding editors are: Cursor, openai-codex, Claude Code, Gemini CLI, Qwen CLI, ...
-
-In this section, we will create a minimal coding CLI from scratch just three tools: Read tool, Write tool and List tool and we will put LLM (with tools) in loop.
-
-Lets first implementn the tools:
+```
+User: What is the weather in Pokhara right now?
+LLM: Checking weather...
+LLM: The weather in Pokhara is rainy.
 ```
 
-# 1. Tool implementations
+The model didn’t know the weather.
 
+It decided to call a function.
+
+---
+
+Memory gave the model continuity.
+Tools give the model agency.
+
+Once a loop can both remember and act, it stops being just a chatbot.
+
+It becomes a system.
+
+---
+
+This transition sets up the next section nicely: coding agents are just *more powerful tools inside the same loop*.
+
+## 2. Coding Agent: A Minimal Claude-Code like CLI
+
+In the previous section the model learned to **act** using tools.
+
+But the moment we give it access to a filesystem, something interesting happens:
+
+It stops being a chatbot
+and becomes a programmer.
+
+Coding assistants feel sophisticated — yet they are only the same loop connected to different tools.
+
+Before chat models, autocomplete tools like Copilot predicted the next line.
+Modern coding agents instead:
+
+1. read files
+2. modify files
+3. run commands
+4. observe results
+5. repeat
+
+That is not a new architecture.
+
+That is a feedback loop.
+
+---
+
+### Give the Model a Computer
+
+We start by exposing three simple capabilities:
+
+```
+read → see code
+write → change code
+list → explore project
+```
+
+#### Tool Implementations
+
+```
 def read_file(path, offset=0, limit=None):
-    """Read file with line numbers.""" 
     content = read(path)
     return content[offset:limit]
 
 def write_file(path, content):
-    """Write content to file."""
     with open(path, 'w') as f:
         f.write(content)
     return "ok"
 
 def list(path):
-    """List files and directories"""
-
-    results = <full-path-of-files-in-path>
-    return results
+    return <files in directory>
 ```
 
+Now we allow the model to use them:
 
 ```
-# 2. respond function
-def respond(query, config):
-    response = <infenrence-code: Execute tool or Get response>
-    return response
-```
-
-```
-# 3. config
 config = GenerateContentConfig(
-    tools=[read_files, write_files, list],
+    tools=[read_file, write_file, list],
     system_instruction=f"Concise coding assistant. cwd: {os.getcwd()}"
 )
-
 ```
 
-Finally, lets put it in loop
-```
-# 4. The Loop
+Our loop remains unchanged.
 
+```
 history = []
 
 while True:
-    query = input("User")
+    query = input("User: ")
     history.append(query)
-    
-    response = respond(query, config=config)
+
+    response = respond(history, config)
     history.append(response)
 
     print(response)
 ```
 
-Example Interaction
+---
+
+### What Emerges
+
+The model can now iteratively modify a project.
+
 ```
 User: create file add.py with function to add two numbers
-LLM: File add.py created with function to add two numbers.
+LLM: File add.py created.
 
-User: create file substract.py with function to substract two numbers
-LLM: File substract.py created with function to substract two numbers.
+User: create file subtract.py with function to subtract two numbers
+LLM: File subtract.py created.
 
-User: create file math.py that imports these two functions and perform demo calculation
-LLM: File math.py created. It imports `add` and `substract` functions and performs demo calculations, printing the results.
-
+User: create file math.py that imports them and runs a demo
+LLM: File math.py created and executed.
 ```
 
-It has generated following files:
+Generated files:
+
 ```
 # add.py
 def add(a, b):
     return a + b
 
-# substract.py
-def substract(a, b):
+# subtract.py
+def subtract(a, b):
     return a - b
-
 
 # math.py
 from add import add
-from substract import substract
+from subtract import subtract
 
-result_add = add(5, 3)
-print(f"5 + 3 = {result_add}")
-
-result_substract = substract(10, 4)
-print(f"10 - 4 = {result_substract}")
+print(add(5, 3))
+print(subtract(10, 4))
 ```
 
-- refer to [nanocode](https://github.com/1rgs/nanocode/blob/master/nanocode.py), ~250 line, Minimal Claude Code alternative for more minimal tools implementation.
+Nothing magical was added.
 
-One of the very powerful tool which would be very helpful in codinig tasks is: `run_bash_command tool`. It is a tool that can run bash command and perform tasks like running grep commands, compiling generated code, installing dependencies and much more. we will implement it in next section.
+We still only have:
+
+> memory + tools + loop
+
+The difference is that the environment is now a **codebase**.
+
+---
+
+### The Missing Superpower: Bash
+
+Real coding agents don’t just edit files — they run programs.
+
+So weill add one extremely powerful tool:
+
+> `run_bash_command`
+
+This allows the model to compile code, install packages, run tests, grep logs, and observe failures.
+
+Once the model can execute commands and react to outputs, the loop stops being reactive and becomes **autonomous**.
+
+And that is exactly what we will build next.
+
+---
+
+> **Additional reference:** [nanocode](https://github.com/1rgs/nanocode/blob/master/nanocode.py) — a ~250 line minimal Claude Code alternative with similar tool implementations.
 
 
 
-## 3. Autonomous Personal Assistant: `Minimal openClaw Implementation - from Scratch` 
-Openclaw (formerly clawdbot) is the fastest growing Agentic personal assistant.
+## 3. Autonomous Personal Assistant: Minimal `openClaw` Implementation
+![](images/3-Personal-Assistant.png)
 
-In this section, we will try to create minimal version of openclaw and ask it to search arxiv for new llm papers and send them to me via telegram.
+OpenClaw (formerly ClawDBot) is an agentic personal assistant that can act autonomously on your behalf.  
 
+In this section, we’ll build a **minimal version** of OpenClaw that can:
 
-### 3.1 SKILLS.md
-SKILLS.md contains instructions which LLM can use to perform tasks (similar to tool calling)
+1. Run bash commands for :
+    1. Checking arXiv for new LLM papers.
+    2. Sending results to your Telegram.
+2. Run continuously via a heartbeat mechanism.
 
-We can search new llm papers from arxiv with GET request tourl like: `https://export.arxiv.org/api/query?search_query=all:llm&start=0&max_results=3&sortBy=submittedDate&sortOrder=descending` 
+---
 
-and to send message to telegram, we have to ping `https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage` with payload like below:
-```
-{
-    'chat_id': TELEGRAM_USER_ID,
-    'text': <message>
-}
-```
+### 3.1 SKILLS.md: Define What the Agent Can Do
 
-Lets start by placing these information in `SKILLS.md`
+`SKILLS.md` is a reference for the LLM — a set of instructions it can use to perform tasks (similar to tool calls).  
+
+For our assistant, we need two capabilities:
+
+1. Fetch new LLM papers from arXiv
+2. Send messages to Telegram
+
+We store these instructions for these in `SKILLS.md`:
+
 ```
 # SKILLS
 
 ## Message User in telegram
 
-1. Get Telegram token and user_id
-use run_bash_command to get TELEGRAM_BOT_TOKEN, TELEGRAM_USER_ID from .env file, use bash command: `cat .env` to read them from .env file
+1. Get TELEGRAM_BOT_TOKEN and TELEGRAM_USER_ID from .env
 
-2. Sending message
-send a post request to endpoint: "https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage" with payload like below
+    - use run_bash_command to get TELEGRAM_BOT_TOKEN, TELEGRAM_USER_ID from .env file, use bash command: `cat .env` to read them from .env file
+
+
+2. Send a POST request to Telegram API with message
+    - send a post request to endpoint: "https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage" with payload like below
     
+    ```
+    {
+        'chat_id': TELEGRAM_USER_ID,
+        'text': <message>
+    }
+    ```
 
-{
-    'chat_id': TELEGRAM_USER_ID,
-    'text': <message>
-}
+> note: Replace TELEGRAM_BOT_TOKEN, TELEGRAM_USER_ID in above template with actual user token and ids from .env
 
 
-## Checking new research papers on LLM
-send a GET request to `export.arxiv.org` e.g.
-https://export.arxiv.org/api/query?search_query=all:llm&start=0&max_results=3&sortBy=submittedDate&sortOrder=descending
+## Check new LLM papers on arXiv
+1. Send GET request to arXiv API
+    Example
+    ```
+    GET: https://export.arxiv.org/api/query?search_query=all:llm&start=0&max_results=3&sortBy=submittedDate&sortOrder=descending
+    ```
+2. Parse and prepare results
 
 ```
 
-Note: For sending messages to user in telegram, we will need `TELEGRAM_BOT_TOKEN` and `user_id`
-  - To get `TELEGRAM_BOT_TOKEN`, chat with @BotFather in telegram. type `/newbot` or `/mybots` and proceed untill you get token
-  - To get `user_id`, send message: `/start` to @userinfobot in telegram.
+> **Note:** To get `TELEGRAM_BOT_TOKEN`, chat with [@BotFather](https://t.me/BotFather) in Telegram.  
+> To get your `user_id`, send `/start` to [@userinfobot](https://t.me/userinfobot).
 
-
+---
 
 ### 3.2 Tool: `run_bash_command`
-Instead of defining seperate tools for these tasks (sending telegram msg., arxiv search), we will write single tool: `run_bash_command` and ask LLM to run commands based on instructions from `SKILLS.md`.
 
-Here is what the tool implementation look like:
+Instead of writing a separate tool for each task, we create **one tool**: `run_bash_command`.  
+The LLM reads instructions from `SKILLS.md` and executes commands via bash commands. Here is what tool implementation looks like:
 
 ```
-# 1. Tool Implementation
 def run_bash_command(command):
     """Execute a bash command and return output."""
     try:
@@ -311,17 +495,18 @@ def run_bash_command(command):
             text=True
         )
         return result.stdout if result.stdout else result.stderr
-    
     except Exception as err:
         return f"Error: {err}"
 ```
 
+---
 
+### 3.3 Respond Function with Iterations
 
-This is our function from previous section with a minor modification, we have added `max_iteration` to allow multiple bash command executions it responds to user.
+We modify the `respond` function to handle multiple tool calls per query:
+
 
 ```
-# 2. respond function
 def respond(history):
     max_iterations = 10
 
@@ -337,98 +522,102 @@ def respond(history):
 
 ```
 
+---
+
+### 3.4 Configure the LLM
+
 ```
-# 3. Config
 config = GenerateContentConfig(
     tools=[run_bash_command],
     system_instruction="You are a helpful assistant that can execute bash commands..."
 )
 ```
 
-And this is the loop (same as previous section):
-```
-# 4. The Loop
+---
 
+### 3.5 Main Loop
+
+```
 history = []
 
 while True:
-    query = input("User")
+    query = input("User: ")
     history.append(query)
-    
-    response = respond(query, config=config)
+
+    response = respond(history, config=config)
     history.append(response)
 
     print(response)
 ```
 
-
-
-
-Example Interaction
-```
-User: find research papers on llm from arxiv and send them to me on telegram
-LLM: reads SKILLS.md -> reads TASKS.md -> reads TELEGRAM_BOT_TOKEN, TELEGRAM_USER_ID -> fetches new papers -> sends them to telegram
-```
-
-
-
-### 3.1 Heartbeat
-Heartbeat is what keeps the agent alive. It has cycle with following components: 
-
-1. Sleep: The agent is put to sleep when idle to save tokens and compute
-2. Wake-Up: The agent wakes after certain time, in something like HEARTBEAT_INTERVAL
-3. The Check-and-Act: It checks if there are any tasks to be performed and perform those tasks, reports to user if necessary and goes back to sleep. Task may include checking application logs periodically to find any bugs, and report to user if there are critical bugs.
-
-
-#### 3.1.1 TASKS.md
-lets write `TASKS.md` to define things the agent should do when it wakes up.
+**Example Interaction:**
 
 ```
-
-find research papers on llm from arxiv and send them to me on telegram
+User: find research papers on LLM from arxiv and send them to me on telegram
+LLM: reads SKILLS.md -> reads TASKS.md -> reads TELEGRAM_BOT_TOKEN, TELEGRAM_USER_ID -> fetches new papers -> sends them to Telegram
 ```
 
-Here is the loop with heartbeat example
+---
+
+### 3.6 Heartbeat — Keep the Agent Alive
+
+The heartbeat allows the agent to run autonomously:
+
+1. **Sleep:** Sleep to save Resources: token usage and compute.
+2. **Wake-Up:** Run periodically (e.g., `HEARTBEAT_INTERVAL`).
+3. **Check-and-Act:** Read `TASKS.md` and execute tasks.
+
+---
+
+#### 3.6.1 TASKS.md
+
+`TASKS.md` defines what the agent should do during each wake cycle:
+
+```
+find research papers on LLM from arxiv and send them to me on telegram
+```
+
+---
+
+#### 3.6.2 Heartbeat Loop Example
+
 ```
 history = []
 
 while True:
-    query = "Read TASKS.md, and execute the instructions"
-    
+    query = "Read TASKS.md and execute instructions"
     history.append(query)
 
-    response = respond(query, config)
+    response = respond(history, config)
     history.append(response)
 
-    # Note: This is the Only thing we are adding in previous code
     print("sleeping...")
     time.sleep(HEARTBEAT_INTERVAL)
 ```
 
-Example Flow
-```
-LLM: Agent wakes up -> reads SKILLS.md -> reads TASKS.md -> reads TELEGRAM_BOT_TOKEN, TELEGRAM_USER_ID -> fetches new papers -> sends them to telegram -> goes back to sleep
-```
-
-#### 3.1.2 Non-Blocking Loop
-That works but TASKS.md is hardcoded and the loop is blocking so user can't give it input when the agent is sleeping.
-
-We will use a background thread for heartbeat loop so that main loop can still react to user input.
-
-and In order to avoid hardcoded TASKS.md, We can ask it to update TASKS.md in main thread and heartbeat
+**Flow:**
 
 ```
-- Main loop → reactive user input
-- Background thread → periodic tasks (heartbeat)
-- Both run concurrently, independent of each other
+LLM wakes up -> reads SKILLS.md -> reads TASKS.md -> reads TELEGRAM_BOT_TOKEN, TELEGRAM_USER_ID -> fetches new papers -> sends to Telegram -> goes back to sleep
 ```
 
-In our toy example, we can run another loop in background that runs once every `HEARTBEAT_INTERVAL`.
+---
+
+#### 3.6.3 Non-Blocking Heartbeat (Background Thread)
+
+To allow the agent to **handle user input while sleeping**, we can run the `heartbeat_loop` in a **background thread**. Meanwhile, the main loop remains reactive to user input.
+
+By separating the loops, we also avoid hardcoding `TASKS.md`, allowing it to be updated dynamically from either the main thread or the heartbeat.
 
 ```
-import threading
-import time
+- Main loop → handles reactive user input
+- Background thread → executes periodic tasks (heartbeat)
+- Both run concurrently and independently
+```
 
+This setup ensures the agent can continuously perform scheduled tasks **without blocking** user interactions.
+
+```
 # Background Loop for TASKS.md
 # -----------------------------
 def heartbeat_loop(HEARTBEAT_INTERVAL):
@@ -447,7 +636,6 @@ threading.Thread(target=heartbeat_loop, args=(86400,), daemon=True).start()
 history = []
 while True:
     query = "Read TASKS.md, and execute the instructions"
-    
     history.append(query)
 
     response = respond(query, config)
@@ -458,16 +646,17 @@ while True:
     time.sleep(HEARTBEAT_INTERVAL)
 ```
 
-Example Flow
+**Flow:**
+
 ```
-User: Update TASKS.md with: find research papers on llm from arxiv and send them to me on telegram
-LLM: updates TASKS.md
+User asks agent to update tasks -> Agent updates TASKS.md
+Heartbeat thread wakes -> executes tasks independently
 
-LLM: wakes up (after) -> reads SKILLS.md -> reads TASKS.md -> reads TELEGRAM_BOT_TOKEN, TELEGRAM_USER_ID -> fetches new papers -> sends them to telegram -> goes back to sleep
+LLM: wakes up -> reads SKILLS.md -> reads TASKS.md -> reads TELEGRAM_BOT_TOKEN, TELEGRAM_USER_ID -> fetches new papers -> sends them to telegram -> goes back to sleep
 ```
 
-update task: get research papers from arxiv and send them to me on telegram
-read TASKS.md, SKILLS.md and complete tasks
 
-Add whatsapp, some other tools and run it 24/7 and it becomes openClaw (crab emoji)
-https://github.com/openclaw/openclaw
+---
+
+> Add more tools (WhatsApp, logs, system monitoring) and the assistant can run 24/7 — that’s essentially **OpenClaw**. 🦀  
+> [https://github.com/openclaw/openclaw](https://github.com/openclaw/openclaw)
